@@ -1,0 +1,67 @@
+Where do you go from here?
+
+_Non-blocking stepper motor control (without interrupts)_
+This could allow you to do more intelligent light sensing (i.e. time-weighted average, which direction was brightest while we moved one motor 180deg?)
+
+_Optimise your code_
+Did you repeat "digitalWrite(motor1Pins[0], HIGH)" through-out your motor control code?
+What about expressing the states of the pins in an array and setting the pins based on an index?
+Is there a mathmatical equation that can replicate the same pattern?
+
+0     0001
+1     0011
+2     0010
+3     0110
+4     0100
+5     1100
+6     1000
+7     1001
+
+We could split it into evens and odds, when the index is even there is only a single bit set, alternatively when odd two bits are set.
+in psudo code
+if ( even(index) ) {
+  output = 1 << (index / 2); // shift left
+}
+else {
+  output = 3 << ((index - 1) / 2); // shift 0b11 left
+}
+
+Replace the function calls to digitalWrite with directly writing a byte to the PORT
+The digitalWrite function uses many clock cycles (one estimate I found online quoted 52 clock cycles! http://www.billporter.info/2010/08/18/ready-set-oscillate-the-fastest-way-to-change-arduino-pins/) each time it is run as it does a lot of error checking and maps the Arduino numbering to the actual IO ports.
+
+
+Here's what I came up with:
+
+byte stepNibble(byte step) { // 0 <= step <= 7
+  // return the motor phase nibble for a specific step (1 of 8 possible steps).
+  // 0001, 0011, 0010, 0110, 0100, 1100, 1000, 1001
+  // this is my attempt at optimising the code, avoiding the use of arrays or a lengthy switch/case.
+  byte result = (0b0001 << ((step + 1) / 2)) | (0b0001 << (step / 2));
+  if (result == 0b11000) result = 0b1001; // this happens on step == 7 
+  return result;
+}
+
+void setStepM1(int stepNo) {
+  // bytewise manipulation of ATMega PORTs
+  // in this case we don't want to affect the lower nibble, so we mask off the upper nibble (sets bits 4-7 to zero) while keeping the current state of the lower nibble then we OR with our step nibble shifted left so the 4 bits are in the upper nibble.
+  // What on earth is a nibble you ask. You've heard that eight bits make a byte right? Well four bits make a nibble, so a byte is made up of two nibbles. Makes perfect sense.
+  PORTD = (PORTD & 0b00001111) | (stepNibble(stepNo % 8) << 4);
+}
+
+void setStepM2(int stepNo) {
+  // and in the simpler case where we mask off the lower nibble and OR with the step nibble.
+  PORTB = (PORTB & 0b11110000) | stepNibble(stepNo % 8);
+}
+
+void motorsOff() {
+  PORTD = (PORTD & 0b00001111);
+  PORTB = (PORTB & 0b11110000);
+}
+
+void motor1Off() {
+  PORTD = (PORTD & 0b00001111);
+}
+
+void motor2Off() {
+  PORTB = (PORTB & 0b11110000);
+}
